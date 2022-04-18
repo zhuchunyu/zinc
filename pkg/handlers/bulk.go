@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,11 +10,13 @@ import (
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
 
 	"github.com/zinclabs/zinc/pkg/core"
+	"github.com/zinclabs/zinc/pkg/ider"
 	"github.com/zinclabs/zinc/pkg/startup"
+	"github.com/zinclabs/zinc/pkg/storage"
 )
 
 func BulkHandler(c *gin.Context) {
@@ -61,12 +62,17 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 	lastLineMetaData := make(map[string]interface{})
 
 	batch := make(map[string]*index.Batch)
+	storageBulk := make(map[string]storage.StorageBulker)
 	var indexesInThisBatch []string
 	var documentsInBatch int
 	var doc map[string]interface{}
+	var err error
 	for scanner.Scan() { // Read each line
-		if err := json.Unmarshal(scanner.Bytes(), &doc); err != nil {
-			log.Error().Msgf("bulk.json.Unmarshal: err %v", err)
+		for k := range doc {
+			delete(doc, k)
+		}
+		if err = json.Unmarshal(scanner.Bytes(), &doc); err != nil {
+			log.Error().Msgf("bulk.json.Unmarshal: err %s", err.Error())
 			continue
 		}
 
@@ -82,7 +88,7 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 				docID = val.(string)
 			}
 			if docID == "" {
-				docID = uuid.New().String()
+				docID = ider.Generate()
 				mintedID = true
 			}
 
@@ -104,12 +110,6 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 			default:
 			}
 
-			// Since this is a bulk request, we need to check if we already created a new batch for this index. We need to create 1 batch per index.
-			if DoesExistInThisRequest(indexesInThisBatch, indexName) == -1 { // Add the list of indexes to the batch if it's not already there
-				indexesInThisBatch = append(indexesInThisBatch, indexName)
-				batch[indexName] = index.NewBatch()
-			}
-
 			_, exists := core.GetIndex(indexName)
 			if !exists { // If the requested indexName does not exist then create it
 				newIndex, err := core.NewIndex(indexName, "disk", core.UseNewIndexMeta, nil)
@@ -122,12 +122,17 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 				}
 			}
 
+			// Since this is a bulk request, we need to check if we already created a new batch for this index. We need to create 1 batch per index.
+			if DoesExistInThisRequest(indexesInThisBatch, indexName) == -1 { // Add the list of indexes to the batch if it's not already there
+				indexesInThisBatch = append(indexesInThisBatch, indexName)
+				batch[indexName] = index.NewBatch()
+				storageBulk[indexName] = core.ZINC_INDEX_LIST[indexName].SourceStorager.Bulk(true)
+			}
+
 			bdoc, err := core.ZINC_INDEX_LIST[indexName].BuildBlugeDocumentFromJSON(docID, doc)
 			if err != nil {
 				return bulkRes, err
 			}
-
-			documentsInBatch++
 
 			// Add the documen to the batch. We will persist the batch to the index
 			// when we have processed all documents in the request
@@ -137,18 +142,30 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 				batch[indexName].Insert(bdoc)
 			}
 
+			// storage source field
+			jsonDoc, _ := json.Marshal(doc)
+			if err := storageBulk[indexName].Set(docID, jsonDoc); err != nil {
+				return bulkRes, err
+			}
+
+			documentsInBatch++
+
 			// refresh index stats
 			core.ZINC_INDEX_LIST[indexName].GainDocsCount(1)
 
 			if documentsInBatch >= batchSize {
-				for _, indexN := range indexesInThisBatch {
+				for _, indexName := range indexesInThisBatch {
 					// Persist the batch to the index
-					err := core.ZINC_INDEX_LIST[indexN].Writer.Batch(batch[indexN])
-					if err != nil {
-						log.Error().Msgf("Error updating batch: %v", err)
+					if err := core.ZINC_INDEX_LIST[indexName].Writer.Batch(batch[indexName]); err != nil {
+						log.Error().Msgf("bulk: index updating batch err %s", err.Error())
 						return bulkRes, err
 					}
-					batch[indexN].Reset()
+					batch[indexName].Reset()
+					if err := storageBulk[indexName].Commit(); err != nil {
+						log.Error().Msgf("bulk: storage updating batch err %s", err.Error())
+						return bulkRes, err
+					}
+					storageBulk[indexName] = core.ZINC_INDEX_LIST[indexName].SourceStorager.Bulk(true)
 				}
 				documentsInBatch = 0
 			}
@@ -185,9 +202,11 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 					if DoesExistInThisRequest(indexesInThisBatch, indexName) == -1 {
 						indexesInThisBatch = append(indexesInThisBatch, indexName)
 						batch[indexName] = index.NewBatch()
+						storageBulk[indexName] = core.ZINC_INDEX_LIST[indexName].SourceStorager.Bulk(true)
 					}
 					batch[indexName].Delete(bdoc.ID())
 					core.ZINC_INDEX_LIST[indexName].ReduceDocsCount(1)
+					storageBulk[indexName].Delete(lastLineMetaData["_id"].(string))
 
 					bulkRes.Count++
 					bulkRes.Items = append(bulkRes.Items, map[string]*BulkResponseItem{
@@ -202,18 +221,19 @@ func BulkHandlerWorker(target string, body io.ReadCloser) (*BulkResponse, error)
 		return bulkRes, err
 	}
 
-	for _, indexN := range indexesInThisBatch {
-		writer := core.ZINC_INDEX_LIST[indexN].Writer
+	for _, indexName := range indexesInThisBatch {
 		// Persist the batch to the index
-		err := writer.Batch(batch[indexN])
-		if err != nil {
-			log.Printf("Error updating batch: %v", err)
+		if err := core.ZINC_INDEX_LIST[indexName].Writer.Batch(batch[indexName]); err != nil {
+			log.Printf("bulk: index updating batch err %s", err.Error())
+			return bulkRes, err
+		}
+		if err := storageBulk[indexName].Commit(); err != nil {
+			log.Error().Msgf("bulk: storage updating batch err %s", err.Error())
 			return bulkRes, err
 		}
 	}
 
 	return bulkRes, nil
-
 }
 
 // DoesExistInThisRequest takes a slice and looks for an element in it. If found it will

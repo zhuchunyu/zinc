@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
+	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
 
 	meta "github.com/zinclabs/zinc/pkg/meta/v2"
@@ -109,11 +109,12 @@ func (index *Index) BuildBlugeDocumentFromJSON(docID string, doc map[string]inte
 			// noop
 		}
 	}
-	docByteVal, _ := json.Marshal(doc)
 	bdoc.AddField(bluge.NewDateTimeField("@timestamp", timestamp).StoreValue().Sortable().Aggregatable())
 	bdoc.AddField(bluge.NewStoredOnlyField("_index", []byte(index.Name)))
-	bdoc.AddField(bluge.NewStoredOnlyField("_source", docByteVal))
-	bdoc.AddField(bluge.NewCompositeFieldExcluding("_all", []string{"_index", "_id", "_source", "@timestamp"}))
+	bdoc.AddField(bluge.NewCompositeFieldExcluding("_all", []string{"_index", "_id", "@timestamp"}))
+
+	// docByteVal, _ := json.Marshal(*doc)
+	// bdoc.AddField(bluge.NewStoredOnlyField("_source", docByteVal))
 
 	return bdoc, nil
 }
@@ -350,4 +351,8 @@ func (index *Index) ReduceDocsCount(n int64) {
 func (index *Index) GainDocsCount(n int64) {
 	atomic.AddInt64(&index.DocsCount, n)
 	index.ReLoadStorageSize()
+}
+
+func (index *Index) Close() error {
+	return index.Writer.Close()
 }

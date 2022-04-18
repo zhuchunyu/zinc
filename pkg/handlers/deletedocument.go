@@ -22,6 +22,7 @@ func DeleteDocument(c *gin.Context) {
 	bdoc.AddField(bluge.NewCompositeFieldExcluding("_all", nil))
 	err := index.Writer.Delete(bdoc.ID())
 	if err != nil {
+		_ = index.DeleteSourceData(queryID)
 		c.JSON(http.StatusInternalServerError, err)
 	} else {
 		core.ZINC_INDEX_LIST[indexName].ReduceDocsCount(1)

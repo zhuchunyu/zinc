@@ -1,23 +1,23 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
+	"github.com/goccy/go-json"
 
 	"github.com/zinclabs/zinc/pkg/directory"
 	meta "github.com/zinclabs/zinc/pkg/meta/v2"
+	"github.com/zinclabs/zinc/pkg/startup"
+	"github.com/zinclabs/zinc/pkg/storage"
 	"github.com/zinclabs/zinc/pkg/zutils"
 )
 
 // NewIndex creates an instance of a physical zinc index that can be used to store and retrieve data.
-func NewIndex(
-	name string, storageType string, useNewIndexMeta int,
-	defaultSearchAnalyzer *analysis.Analyzer) (*Index, error) {
+func NewIndex(name, storageType string, useNewIndexMeta int, defaultSearchAnalyzer *analysis.Analyzer) (*Index, error) {
 	if name == "" {
 		return nil, fmt.Errorf("core.NewIndex: index name cannot be empty")
 	}
@@ -37,7 +37,7 @@ func NewIndex(
 	default:
 		storageType = "disk"
 		dataPath = zutils.GetEnv("ZINC_DATA_PATH", "./data")
-		config = bluge.DefaultConfig(dataPath + "/" + name)
+		config = directory.GetBadgerConfig(dataPath, name)
 	}
 
 	if defaultSearchAnalyzer != nil {
@@ -71,6 +71,13 @@ func NewIndex(
 		}
 	}
 
+	// get source storage handler
+	sourceStorage, err := storage.Cli.GetIndex(name, startup.LoadSourceStorageEngine())
+	if err != nil {
+		return nil, err
+	}
+	index.SourceStorager = sourceStorage
+
 	return index, nil
 }
 
@@ -87,7 +94,7 @@ func LoadIndexWriter(name string, storageType string, defaultSearchAnalyzer *ana
 		config = directory.GetMinIOConfig(dataPath, name)
 	default:
 		dataPath = zutils.GetEnv("ZINC_DATA_PATH", "./data")
-		config = bluge.DefaultConfig(dataPath + "/" + name)
+		config = directory.GetBadgerConfig(dataPath, name)
 	}
 
 	if defaultSearchAnalyzer != nil {
@@ -113,6 +120,7 @@ func StoreIndex(index *Index) error {
 	bdoc.AddField(bluge.NewKeywordField("name", index.Name).StoreValue().Sortable())
 	bdoc.AddField(bluge.NewKeywordField("index_type", index.IndexType).StoreValue().Sortable())
 	bdoc.AddField(bluge.NewKeywordField("storage_type", index.StorageType).StoreValue().Sortable())
+	bdoc.AddField(bluge.NewKeywordField("source_storage_type", index.SourceStorageType).StoreValue().Sortable())
 
 	settingByteVal, _ := json.Marshal(&index.Settings)
 	bdoc.AddField(bluge.NewStoredOnlyField("settings", settingByteVal))
@@ -125,7 +133,7 @@ func StoreIndex(index *Index) error {
 
 	err := ZINC_SYSTEM_INDEX_LIST["_index"].Writer.Update(bdoc.ID(), bdoc)
 	if err != nil {
-		return fmt.Errorf("core.StoreIndex: index: %s, error: %v", index.Name, err)
+		return fmt.Errorf("core.StoreIndex: index: %s, error: %s", index.Name, err.Error())
 	}
 
 	// cache index
@@ -139,7 +147,7 @@ func DeleteIndex(name string) error {
 	bdoc.AddField(bluge.NewCompositeFieldExcluding("_all", nil))
 	err := ZINC_SYSTEM_INDEX_LIST["_index"].Writer.Delete(bdoc.ID())
 	if err != nil {
-		return fmt.Errorf("core.DeleteIndex: error deleting template: %v", err)
+		return fmt.Errorf("core.DeleteIndex: error deleting template: %s", err.Error())
 	}
 
 	return nil

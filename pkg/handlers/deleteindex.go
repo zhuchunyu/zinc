@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/zinclabs/zinc/pkg/core"
+	"github.com/zinclabs/zinc/pkg/storage"
 	"github.com/zinclabs/zinc/pkg/zutils"
 )
 
@@ -40,6 +41,13 @@ func DeleteIndex(c *gin.Context) {
 		err := os.RemoveAll(dataPath + "/" + index.Name)
 		if err != nil {
 			log.Error().Msgf("failed to delete index: %s", err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		storage.Cli.DeleteIndex(index.Name)
+		err = os.RemoveAll(dataPath + "/_storage/" + index.Name)
+		if err != nil {
+			log.Error().Msgf("failed to delete storage index: %s", err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

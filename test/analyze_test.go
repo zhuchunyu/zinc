@@ -2,11 +2,12 @@ package test
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-json"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
