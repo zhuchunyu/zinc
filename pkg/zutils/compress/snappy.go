@@ -7,14 +7,14 @@ import (
 	"github.com/golang/snappy"
 )
 
-// ZSTDDecompress decompresses a block using ZSTD algorithm.
+// SnappyDecompress decompresses a block using Snappy algorithm.
 func SnappyDecompress(f io.Reader) ([]byte, error) {
 	decoder := snappy.NewReader(f)
 	return ioutil.ReadAll(decoder)
 }
 
-// ZSTDCompress compresses a block using ZSTD algorithm.
-func SnappyCompress(f io.Writer, src []byte, _ int) (int, error) {
+// SnappyCompress compresses a block using Snappy algorithm.
+func SnappyCompress(f io.Writer, src []byte) (int, error) {
 	encoder := snappy.NewBufferedWriter(f)
 	defer encoder.Close()
 	return encoder.Write(src)

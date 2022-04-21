@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/zinclabs/zinc/pkg/storage"
+	"github.com/zinclabs/zinc/pkg/zutils/compress"
 )
 
 const (
@@ -22,6 +23,7 @@ var maxResults = DEFAULT_MAX_RESULTS
 var aggregationTermsSize = DEFAULT_AGGREGATION_TERMS_SIZE
 
 var sourceStorageEngine = storage.DBEngineBadger
+var indexCompressAlgorithm = compress.SNAPPY
 
 func init() {
 	err := godotenv.Load()
@@ -64,6 +66,19 @@ func init() {
 			sourceStorageEngine = storage.DBEngineBadger
 		}
 	}
+
+	vs = os.Getenv("ZINC_INDEX_COMPRESS_ALGORITHM")
+	if vs != "" {
+		vs = strings.ToLower(vs)
+		switch vs {
+		case "lz4":
+			indexCompressAlgorithm = compress.LZ4
+		case "zstd":
+			indexCompressAlgorithm = compress.ZSTD
+		default:
+			indexCompressAlgorithm = compress.SNAPPY
+		}
+	}
 }
 
 func LoadBatchSize() int {
@@ -80,4 +95,8 @@ func LoadAggregationTermsSize() int {
 
 func LoadSourceStorageEngine() string {
 	return sourceStorageEngine
+}
+
+func LoadIndexCompressAlgorithm() string {
+	return indexCompressAlgorithm
 }

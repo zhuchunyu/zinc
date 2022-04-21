@@ -24,16 +24,15 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/blevesearch/mmap-go"
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
 	"github.com/blugelabs/bluge/index/lock"
 	segment "github.com/blugelabs/bluge_segment_api"
+	"github.com/zinclabs/zinc/pkg/startup"
 	"github.com/zinclabs/zinc/pkg/zutils/compress"
 )
 
 const pidFilename = "bluge.pid"
-const ZSTDCompressionLevel = 3
 
 type LoadMMapFunc func(f lock.LockedFile) (*segment.Data, io.Closer, error)
 
@@ -46,8 +45,6 @@ type CompressDirectory struct {
 
 	openExclusive func(path string, flag int, perm os.FileMode) (lock.LockedFile, error)
 	openShared    func(path string, flag int, perm os.FileMode) (lock.LockedFile, error)
-
-	loadMMapFunc LoadMMapFunc
 }
 
 // GetCompressConfig returns a bluge config that will store index data with compression
@@ -65,7 +62,6 @@ func NewCompressDirectory(path string) *CompressDirectory {
 		openShared:    lock.OpenShared,
 		newDirPerm:    0700,
 		newFilePerm:   0600,
-		loadMMapFunc:  LoadMMapNeverByCompress,
 	}
 }
 
@@ -142,7 +138,7 @@ func (d *CompressDirectory) Persist(kind string, id uint64, w index.WriterTo, cl
 		return err
 	}
 
-	_, err = compress.SnappyCompress(f.File(), buf.Bytes(), ZSTDCompressionLevel)
+	_, err = d.compressData(f.File(), buf.Bytes())
 	if err != nil {
 		cleanup()
 		return err
@@ -164,85 +160,19 @@ func (d *CompressDirectory) Persist(kind string, id uint64, w index.WriterTo, cl
 	return nil
 }
 
-func LoadMMapAlways(f lock.LockedFile) (*segment.Data, io.Closer, error) {
-	mm, err := mmap.Map(f.File(), mmap.RDONLY, 0)
-	if err != nil {
-		// mmap failed, try to close the file
-		_ = f.Close()
-		return nil, nil, err
-	}
-
-	closeFunc := func() error {
-		err := mm.Unmap()
-		// try to close file even if unmap failed
-		err2 := f.Close()
-		if err == nil {
-			// try to return first error
-			err = err2
-		}
-		return err
-	}
-
-	return segment.NewDataBytes(mm), closerFunc(closeFunc), nil
-}
-
-func LoadMMapByCompress(f lock.LockedFile) (*segment.Data, io.Closer, error) {
-	mm, err := mmap.Map(f.File(), mmap.RDONLY, 0)
-	if err != nil {
-		// mmap failed, try to close the file
-		_ = f.Close()
-		return nil, nil, err
-	}
-
-	closeFunc := func() error {
-		err := mm.Unmap()
-		// try to close file even if unmap failed
-		err2 := f.Close()
-		if err == nil {
-			// try to return first error
-			err = err2
-		}
-		return err
-	}
-
-	buf, err := compress.ZSTDDecompress(mm)
-	if err != nil {
-		// decompress failed, try to close the file
-		_ = f.Close()
-		return nil, nil, err
-	}
-	return segment.NewDataBytes(buf), closerFunc(closeFunc), nil
-}
-
-func LoadMMapNeverByCompress(f lock.LockedFile) (*segment.Data, io.Closer, error) {
-	buf, err := compress.SnappyDecompress(f.File())
-	if err != nil {
-		// decompress failed, try to close the file
-		_ = f.Close()
-		return nil, nil, err
-	}
-	return segment.NewDataBytes(buf), closerFunc(f.Close), nil
-}
-
-func LoadMMapNever(f lock.LockedFile) (*segment.Data, io.Closer, error) {
-	data, err := segment.NewDataFile(f.File())
-	if err != nil {
-		return nil, nil, fmt.Errorf("error creating data from file: %w", err)
-	}
-	return data, closerFunc(f.Close), nil
-}
-
-func (d *CompressDirectory) SetLoadMMapFunc(f LoadMMapFunc) {
-	d.loadMMapFunc = f
-}
-
 func (d *CompressDirectory) Load(kind string, id uint64) (*segment.Data, io.Closer, error) {
 	path := filepath.Join(d.path, d.fileName(kind, id))
 	f, err := d.openShared(path, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	return d.loadMMapFunc(f)
+
+	data, err := d.deCompressData(f.File())
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating data from file: %w", err)
+	}
+
+	return segment.NewDataBytes(data), closerFunc(f.Close), nil
 }
 
 func (d *CompressDirectory) Remove(kind string, id uint64) error {
@@ -313,6 +243,32 @@ func (d *CompressDirectory) Sync() error {
 		return fmt.Errorf("error closing directing after sync: %w", err)
 	}
 	return nil
+}
+
+func (d *CompressDirectory) compressData(dst io.Writer, src []byte) (int, error) {
+	switch startup.LoadIndexCompressAlgorithm() {
+	case compress.LZ4:
+		return compress.LZ4Compress(dst, src)
+	case compress.ZSTD:
+		return compress.ZSTDCompress(dst, src, 3) // ZSTD compression level: 1, 3, 9
+	default: // SNAPPY
+		return compress.SnappyCompress(dst, src)
+	}
+}
+
+func (d *CompressDirectory) deCompressData(src *os.File) ([]byte, error) {
+	switch startup.LoadIndexCompressAlgorithm() {
+	case compress.LZ4:
+		return compress.LZ4Decompress(src)
+	case compress.ZSTD:
+		buf, err := io.ReadAll(src)
+		if err != nil {
+			return nil, err
+		}
+		return compress.ZSTDDecompress(buf)
+	default: // SNAPPY
+		return compress.SnappyDecompress(src)
+	}
 }
 
 func (d *CompressDirectory) fileName(kind string, id uint64) string {
