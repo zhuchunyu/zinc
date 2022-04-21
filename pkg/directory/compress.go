@@ -29,7 +29,7 @@ import (
 	"github.com/blugelabs/bluge/index"
 	"github.com/blugelabs/bluge/index/lock"
 	segment "github.com/blugelabs/bluge_segment_api"
-	"github.com/zinclabs/zinc/pkg/zutils"
+	"github.com/zinclabs/zinc/pkg/zutils/compress"
 )
 
 const pidFilename = "bluge.pid"
@@ -65,7 +65,7 @@ func NewCompressDirectory(path string) *CompressDirectory {
 		openShared:    lock.OpenShared,
 		newDirPerm:    0700,
 		newFilePerm:   0600,
-		loadMMapFunc:  LoadMMapByCompress,
+		loadMMapFunc:  LoadMMapNeverByCompress,
 	}
 }
 
@@ -142,7 +142,7 @@ func (d *CompressDirectory) Persist(kind string, id uint64, w index.WriterTo, cl
 		return err
 	}
 
-	_, err = zutils.ZSTDCompress(f.File(), buf.Bytes(), ZSTDCompressionLevel)
+	_, err = compress.SnappyCompress(f.File(), buf.Bytes(), ZSTDCompressionLevel)
 	if err != nil {
 		cleanup()
 		return err
@@ -205,13 +205,23 @@ func LoadMMapByCompress(f lock.LockedFile) (*segment.Data, io.Closer, error) {
 		return err
 	}
 
-	buf, err := zutils.ZSTDDecompress(nil, mm)
+	buf, err := compress.ZSTDDecompress(mm)
 	if err != nil {
 		// decompress failed, try to close the file
 		_ = f.Close()
 		return nil, nil, err
 	}
 	return segment.NewDataBytes(buf), closerFunc(closeFunc), nil
+}
+
+func LoadMMapNeverByCompress(f lock.LockedFile) (*segment.Data, io.Closer, error) {
+	buf, err := compress.SnappyDecompress(f.File())
+	if err != nil {
+		// decompress failed, try to close the file
+		_ = f.Close()
+		return nil, nil, err
+	}
+	return segment.NewDataBytes(buf), closerFunc(f.Close), nil
 }
 
 func LoadMMapNever(f lock.LockedFile) (*segment.Data, io.Closer, error) {

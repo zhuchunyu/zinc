@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package zutils
+package compress
 
 import (
 	"io"
@@ -30,7 +30,7 @@ var (
 )
 
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
-func ZSTDDecompress(dst, src []byte) ([]byte, error) {
+func ZSTDDecompress(src []byte) ([]byte, error) {
 	decOnce.Do(func() {
 		var err error
 		decoder, err = zstd.NewReader(nil)

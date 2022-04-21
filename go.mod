@@ -16,6 +16,7 @@ require (
 	github.com/gin-gonic/gin v1.7.4
 	github.com/go-ego/gse v0.70.0
 	github.com/goccy/go-json v0.9.6
+	github.com/golang/snappy v0.0.4
 	github.com/joho/godotenv v1.4.0
 	github.com/klauspost/compress v1.13.5
 	github.com/minio/minio-go/v7 v7.0.21
@@ -73,7 +74,6 @@ require (
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/golang/snappy v0.0.3 // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 // indirect
