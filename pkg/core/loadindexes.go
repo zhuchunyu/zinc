@@ -16,6 +16,7 @@
 package core
 
 import (
+	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/rs/zerolog/log"
 
@@ -49,14 +50,14 @@ func LoadZincIndexesFromMetadata() error {
 		}
 
 		// load index data
-		var defaultSearchAnalyzer *analysis.Analyzer
-		if index.CachedAnalyzers != nil {
-			defaultSearchAnalyzer = index.CachedAnalyzers["default"]
-		}
-		index.Writer, err = LoadIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer)
-		if err != nil {
-			return errors.New(errors.ErrorTypeRuntimeException, "load index writer error").Cause(err)
-		}
+		// var defaultSearchAnalyzer *analysis.Analyzer
+		// if index.CachedAnalyzers != nil {
+		// 	defaultSearchAnalyzer = index.CachedAnalyzers["default"]
+		// }
+		// index.Writer, err = LoadIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer)
+		// if err != nil {
+		// 	return errors.New(errors.ErrorTypeRuntimeException, "load index writer error").Cause(err)
+		// }
 
 		// load index docs count
 		index.DocsCount, _ = index.LoadDocsCount()
@@ -68,4 +69,54 @@ func LoadZincIndexesFromMetadata() error {
 	}
 
 	return nil
+}
+
+func (index *Index) GetWriter() (*bluge.Writer, error) {
+	index.m.RLock()
+	w := index.Writer
+	index.m.RUnlock()
+	if w != nil {
+		return w, nil
+	}
+
+	index.m.Lock()
+	err := index.open(false)
+	index.m.Unlock()
+	return index.Writer, err
+}
+
+func (index *Index) GetReader() (*bluge.Reader, error) {
+	var err error
+	index.m.RLock()
+	r := index.Reader
+	if r == nil && index.Writer != nil {
+		r, err = index.Writer.Reader()
+	}
+	index.m.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	if r != nil {
+		return r, nil
+	}
+
+	index.m.Lock()
+	err = index.open(false)
+	index.m.Unlock()
+	return index.Reader, err
+}
+
+func (index *Index) open(write bool) error {
+	var defaultSearchAnalyzer *analysis.Analyzer
+	if index.CachedAnalyzers != nil {
+		defaultSearchAnalyzer = index.CachedAnalyzers["default"]
+	}
+
+	var err error
+	if write {
+		index.Writer, err = OpenIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer)
+	} else {
+		index.Reader, err = OpenIndexReader(index.Name, index.StorageType, defaultSearchAnalyzer)
+	}
+	return err
 }

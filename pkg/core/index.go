@@ -21,6 +21,7 @@ import (
 	"math"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +43,8 @@ type Index struct {
 	StorageSizeNextTime time.Time                     `json:"-"`
 	CachedAnalyzers     map[string]*analysis.Analyzer `json:"-"`
 	Writer              *bluge.Writer                 `json:"-"`
+	Reader              *bluge.Reader                 `json:"-"`
+	m                   sync.RWMutex                  `json:"-"`
 }
 
 // BuildBlugeDocumentFromJSON returns the bluge document for the json document. It also updates the mapping for the fields if not found.
@@ -139,7 +142,7 @@ func (index *Index) BuildBlugeDocumentFromJSON(docID string, doc map[string]inte
 	bdoc.AddField(bluge.NewStoredOnlyField("_source", docByteVal))
 	bdoc.AddField(bluge.NewCompositeFieldExcluding("_all", []string{"_id", "_index", "_source", "@timestamp"}))
 
-	// test for add time index
+	// Add time for index
 	bdoc.SetTimestamp(timestamp.UnixNano())
 
 	return bdoc, nil
@@ -291,7 +294,7 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 func (index *Index) LoadDocsCount() (int64, error) {
 	query := bluge.NewMatchAllQuery()
 	searchRequest := bluge.NewTopNSearch(0, query).WithStandardAggregations()
-	reader, err := index.Writer.Reader()
+	reader, err := index.GetReader()
 	if err != nil {
 		return 0, err
 	}
@@ -341,5 +344,20 @@ func (index *Index) GainDocsCount(n int64) {
 }
 
 func (index *Index) Close() error {
-	return index.Writer.Close()
+	var err1, err2 error
+	index.m.Lock()
+	if index.Reader != nil {
+		err1 = index.Reader.Close()
+		index.Reader = nil
+	}
+	if index.Writer != nil {
+		err2 = index.Writer.Close()
+		index.Writer = nil
+	}
+	index.m.Unlock()
+
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }

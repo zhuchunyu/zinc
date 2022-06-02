@@ -50,7 +50,7 @@ func NewIndex(name, storageType string, defaultSearchAnalyzer *analysis.Analyzer
 	default:
 		storageType = "disk"
 		dataPath = config.Global.DataPath
-		cfg = bluge.DefaultConfig(dataPath + "/" + name)
+		cfg = directory.GetDiskConfig(dataPath, name)
 	}
 
 	if defaultSearchAnalyzer != nil {
@@ -77,26 +77,35 @@ func NewIndex(name, storageType string, defaultSearchAnalyzer *analysis.Analyzer
 }
 
 // LoadIndexWriter load the index writer from the storage
-func LoadIndexWriter(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer) (*bluge.Writer, error) {
+func OpenIndexWriter(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer, timeRange ...int64) (*bluge.Writer, error) {
+	cfg := getOpenConfig(name, storageType, defaultSearchAnalyzer, timeRange...)
+	return bluge.OpenWriter(cfg)
+}
+
+// OpenIndexReader load the index reader from the storage
+func OpenIndexReader(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer, timeRange ...int64) (*bluge.Reader, error) {
+	cfg := getOpenConfig(name, storageType, defaultSearchAnalyzer, timeRange...)
+	return bluge.OpenReader(cfg)
+}
+
+func getOpenConfig(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer, timeRange ...int64) bluge.Config {
 	var dataPath string
 	var cfg bluge.Config
 	switch storageType {
 	case "s3":
 		dataPath = config.Global.S3.Bucket
-		cfg = directory.GetS3Config(dataPath, name)
+		cfg = directory.GetS3Config(dataPath, name, timeRange...)
 	case "minio":
 		dataPath = config.Global.MinIO.Bucket
-		cfg = directory.GetMinIOConfig(dataPath, name)
+		cfg = directory.GetMinIOConfig(dataPath, name, timeRange...)
 	default:
 		dataPath = config.Global.DataPath
-		cfg = bluge.DefaultConfig(dataPath + "/" + name)
+		cfg = directory.GetDiskConfig(dataPath, name, timeRange...)
 	}
-
 	if defaultSearchAnalyzer != nil {
 		cfg.DefaultSearchAnalyzer = defaultSearchAnalyzer
 	}
-
-	return bluge.OpenWriter(cfg)
+	return cfg
 }
 
 // storeIndex stores the index to metadata
