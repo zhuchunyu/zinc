@@ -28,6 +28,7 @@ import (
 	"github.com/zinclabs/zinc/pkg/uquery"
 	"github.com/zinclabs/zinc/pkg/uquery/fields"
 	"github.com/zinclabs/zinc/pkg/uquery/source"
+	"github.com/zinclabs/zinc/pkg/uquery/timerange"
 )
 
 func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) {
@@ -36,7 +37,8 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 		return nil, err
 	}
 
-	reader, err := index.GetReader()
+	min, max := timerange.Query(query.Query)
+	reader, err := index.GetReader(min, max)
 	if err != nil {
 		log.Printf("index.SearchV2: error accessing reader: %s", err.Error())
 		return nil, err

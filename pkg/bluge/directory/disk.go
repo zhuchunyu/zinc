@@ -29,7 +29,7 @@ func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.
 	config := index.DefaultConfig(path.Join(rootPath, indexName))
 	if len(timeRange) == 2 {
 		if timeRange[0] <= timeRange[1] {
-			config.WithTimeRange(timeRange[0], timeRange[1])
+			config = config.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
 	return bluge.DefaultConfigWithIndexConfig(config)

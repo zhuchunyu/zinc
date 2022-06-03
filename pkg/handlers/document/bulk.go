@@ -144,8 +144,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 				batch[indexName] = index.NewBatch()
 			}
 
-			index, _ := core.GetIndex(indexName)
-			bdoc, err := index.BuildBlugeDocumentFromJSON(docID, doc)
+			newIndex, _ := core.GetIndex(indexName)
+			bdoc, err := newIndex.BuildBlugeDocumentFromJSON(docID, doc)
 			if err != nil {
 				return bulkRes, err
 			}
@@ -161,16 +161,17 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			documentsInBatch++
 
 			// refresh index stats
-			index.GainDocsCount(1)
+			newIndex.GainDocsCount(1)
 
 			if documentsInBatch >= batchSize {
-				writer, err := index.GetWriter()
-				if err != nil {
-					log.Error().Msgf("bulk: index updating batch err %s", err.Error())
-					return bulkRes, err
-				}
 				for _, indexName := range indexesInThisBatch {
 					// Persist the batch to the index
+					newIndex, _ := core.GetIndex(indexName)
+					writer, err := newIndex.GetWriter()
+					if err != nil {
+						log.Error().Msgf("bulk: index updating batch err %s", err.Error())
+						return bulkRes, err
+					}
 					if err := writer.Batch(batch[indexName]); err != nil {
 						log.Error().Msgf("bulk: index updating batch err %s", err.Error())
 						return bulkRes, err
@@ -224,8 +225,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 						batch[indexName] = index.NewBatch()
 					}
 					batch[indexName].Delete(bdoc.ID())
-					index, _ := core.GetIndex(indexName)
-					index.ReduceDocsCount(1)
+					newIndex, _ := core.GetIndex(indexName)
+					newIndex.ReduceDocsCount(1)
 
 					bulkRes.Count++
 					bulkRes.Items = append(bulkRes.Items, map[string]*BulkResponseItem{
@@ -242,8 +243,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 	for _, indexName := range indexesInThisBatch {
 		// Persist the batch to the index
-		index, _ := core.GetIndex(indexName)
-		writer, err := index.GetWriter()
+		newIndex, _ := core.GetIndex(indexName)
+		writer, err := newIndex.GetWriter()
 		if err != nil {
 			log.Error().Msgf("bulk: index updating batch err %s", err.Error())
 			return bulkRes, err

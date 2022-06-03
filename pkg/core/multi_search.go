@@ -27,9 +27,11 @@ import (
 
 	"github.com/zinclabs/zinc/pkg/meta"
 	"github.com/zinclabs/zinc/pkg/uquery"
+	"github.com/zinclabs/zinc/pkg/uquery/timerange"
 )
 
 func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchResponse, error) {
+	min, max := timerange.Query(query)
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
 	var readers []*bluge.Reader
@@ -40,7 +42,7 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 				continue
 			}
 			if indexName == "" || (indexName != "" && strings.HasPrefix(index.Name, indexName[:len(indexName)-1])) {
-				reader, err := index.GetReader()
+				reader, err := index.GetReader(min, max)
 				if err != nil {
 					return nil, err
 				}

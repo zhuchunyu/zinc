@@ -80,16 +80,16 @@ func (index *Index) GetWriter() (*bluge.Writer, error) {
 	}
 
 	index.m.Lock()
-	err := index.open(false)
+	err := index.open(true, 0, 0)
 	index.m.Unlock()
 	return index.Writer, err
 }
 
-func (index *Index) GetReader() (*bluge.Reader, error) {
+func (index *Index) GetReader(timeMin, timeMax int64) (*bluge.Reader, error) {
+	var r *bluge.Reader
 	var err error
 	index.m.RLock()
-	r := index.Reader
-	if r == nil && index.Writer != nil {
+	if index.Writer != nil {
 		r, err = index.Writer.Reader()
 	}
 	index.m.RUnlock()
@@ -100,23 +100,39 @@ func (index *Index) GetReader() (*bluge.Reader, error) {
 		return r, nil
 	}
 
+	// TODO cache reader
+
 	index.m.Lock()
-	err = index.open(false)
+	err = index.open(false, timeMin, timeMax)
+	r = index.Reader.reader
+	index.Reader = nil
 	index.m.Unlock()
-	return index.Reader, err
+	return r, err
 }
 
-func (index *Index) open(write bool) error {
+func (index *Index) open(write bool, timeMin, timeMax int64) error {
 	var defaultSearchAnalyzer *analysis.Analyzer
 	if index.CachedAnalyzers != nil {
 		defaultSearchAnalyzer = index.CachedAnalyzers["default"]
 	}
 
-	var err error
 	if write {
-		index.Writer, err = OpenIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer)
-	} else {
-		index.Reader, err = OpenIndexReader(index.Name, index.StorageType, defaultSearchAnalyzer)
+		writer, err := OpenIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer, 0, 0)
+		if err != nil {
+			return err
+		}
+		index.Writer = writer
+		return nil
 	}
-	return err
+
+	reader, err := OpenIndexReader(index.Name, index.StorageType, defaultSearchAnalyzer, timeMin, timeMax)
+	if err != nil {
+		return err
+	}
+	index.Reader = &IndexReader{
+		reader:  reader,
+		timeMin: timeMin,
+		timeMax: timeMax,
+	}
+	return nil
 }

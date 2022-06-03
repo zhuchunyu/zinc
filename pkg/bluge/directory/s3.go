@@ -41,7 +41,7 @@ func GetS3Config(bucket string, indexName string, timeRange ...int64) bluge.Conf
 	})
 	if len(timeRange) == 2 {
 		if timeRange[0] <= timeRange[1] {
-			config.WithTimeRange(timeRange[0], timeRange[1])
+			config = config.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
 	return bluge.DefaultConfigWithIndexConfig(config)

@@ -43,8 +43,14 @@ type Index struct {
 	StorageSizeNextTime time.Time                     `json:"-"`
 	CachedAnalyzers     map[string]*analysis.Analyzer `json:"-"`
 	Writer              *bluge.Writer                 `json:"-"`
-	Reader              *bluge.Reader                 `json:"-"`
+	Reader              *IndexReader                  `json:"-"`
 	m                   sync.RWMutex                  `json:"-"`
+}
+
+type IndexReader struct {
+	reader  *bluge.Reader
+	timeMin int64
+	timeMax int64
 }
 
 // BuildBlugeDocumentFromJSON returns the bluge document for the json document. It also updates the mapping for the fields if not found.
@@ -292,9 +298,10 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 }
 
 func (index *Index) LoadDocsCount() (int64, error) {
+	return 0, nil
 	query := bluge.NewMatchAllQuery()
 	searchRequest := bluge.NewTopNSearch(0, query).WithStandardAggregations()
-	reader, err := index.GetReader()
+	reader, err := index.GetReader(0, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -346,8 +353,8 @@ func (index *Index) GainDocsCount(n int64) {
 func (index *Index) Close() error {
 	var err1, err2 error
 	index.m.Lock()
-	if index.Reader != nil {
-		err1 = index.Reader.Close()
+	if index.Reader != nil && index.Reader.reader != nil {
+		err1 = index.Reader.reader.Close()
 		index.Reader = nil
 	}
 	if index.Writer != nil {
